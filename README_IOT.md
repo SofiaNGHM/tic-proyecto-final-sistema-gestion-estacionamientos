@@ -113,6 +113,8 @@ Argumentos utiles:
 ```powershell
 cd ..
 cd monitor
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python monitor.py --broker localhost --parking-id estacionamiento-central
 ```
