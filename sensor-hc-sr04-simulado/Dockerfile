@@ -8,6 +8,6 @@ COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r requirements.txt
 
-COPY parking_simulator.py monitor.py /app/
+COPY parking_simulator.py /app/parking_simulator.py
 
 ENTRYPOINT ["python", "parking_simulator.py"]

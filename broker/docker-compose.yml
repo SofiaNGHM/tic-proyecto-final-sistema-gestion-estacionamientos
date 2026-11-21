@@ -25,7 +25,7 @@
   monitor:
     profiles: ["monitor"]
     build:
-      context: ../sensor-hc-sr04-simulado
+      context: ../monitor
     container_name: monitor_estacionamiento
     depends_on:
       - emqx
