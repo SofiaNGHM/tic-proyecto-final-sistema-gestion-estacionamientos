@@ -50,7 +50,7 @@ iot/estacionamiento-central/espacio/A-01/estado
 }
 ```
 
-El sensor publica con `retain=True`, por lo que un consumidor recibe el ultimo estado conocido al conectarse.
+El sensor publica con `retain=True` (persistir), por lo que un consumidor recibe el ultimo estado conocido al conectarse.
 
 ## Ejecucion con Docker
 
