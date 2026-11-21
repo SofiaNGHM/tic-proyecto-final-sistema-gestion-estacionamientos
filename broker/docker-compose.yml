@@ -1,0 +1,36 @@
+﻿services:
+  emqx:
+    image: emqx/emqx:latest
+    container_name: emqx_broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "18083:18083"
+
+  simulator:
+    build:
+      context: ../sensor-hc-sr04-simulado
+    container_name: sensor_hc_sr04
+    restart: unless-stopped
+    depends_on:
+      - emqx
+    environment:
+      MQTT_BROKER: emqx
+      MQTT_PORT: "1883"
+      PARKING_ID: estacionamiento-central
+      SPOTS: "8"
+      INTERVAL_SECONDS: "5"
+
+  monitor:
+    profiles: ["monitor"]
+    build:
+      context: ../sensor-hc-sr04-simulado
+    container_name: monitor_estacionamiento
+    depends_on:
+      - emqx
+    environment:
+      MQTT_BROKER: emqx
+      MQTT_PORT: "1883"
+      PARKING_ID: estacionamiento-central
+    command: ["python", "monitor.py"]
