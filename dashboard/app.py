@@ -6,6 +6,18 @@ import json
 import queue
 import requests
 import os
+import io
+import html
+import re
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer,
+    Table, TableStyle, HRFlowable
+)
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Smart Parking", page_icon="🅿️", layout="wide")
@@ -35,6 +47,8 @@ if 'mqtt_connected' not in st.session_state:
     st.session_state.mqtt_connected = False
 if 'last_update' not in st.session_state:
     st.session_state.last_update = "Sin datos"
+if 'pdf_report' not in st.session_state:
+    st.session_state.pdf_report = None
 
 def update_state():
     occupied = sum(st.session_state.parking_data.values())
@@ -76,6 +90,266 @@ if 'mqtt_client' not in st.session_state:
 
 
 # --- DASHBOARD CON ACTUALIZACIÓN AUTOMÁTICA ---
+def generar_pdf(informe):
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.8 * cm,
+        leftMargin=1.8 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm
+    )
+
+    azul = colors.HexColor("#3D348B")
+    azul_claro = colors.HexColor("#E0E1FF")
+    gris = colors.HexColor("#F3F4F6")
+    texto = colors.HexColor("#333333")
+
+    styles = getSampleStyleSheet()
+
+    styles.add(ParagraphStyle(
+        name="Portada",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=21,
+        leading=27,
+        textColor=azul,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="Subtitulo",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=colors.HexColor("#777777"),
+        alignment=TA_CENTER,
+        leading=15
+    ))
+
+    styles.add(ParagraphStyle(
+        name="Seccion",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=13,
+        leading=17,
+        textColor=azul,
+        spaceBefore=15,
+        spaceAfter=9
+    ))
+
+    styles.add(ParagraphStyle(
+        name="Contenido",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9.5,
+        leading=15,
+        textColor=texto,
+        spaceAfter=7,
+        alignment=4
+    ))
+
+    styles.add(ParagraphStyle(
+        name="Celda",
+        parent=styles["BodyText"],
+        fontSize=8.5,
+        leading=12,
+        textColor=texto
+    ))
+
+    styles.add(ParagraphStyle(
+        name="CeldaBlanca",
+        parent=styles["BodyText"],
+        fontName="Helvetica-Bold",
+        fontSize=8.5,
+        leading=12,
+        textColor=colors.white
+    ))
+
+    contenido = []
+
+    # Encabezado del informe
+    contenido.append(Spacer(1, 15))
+    contenido.append(Paragraph(
+        "INFORME ADMINISTRATIVO",
+        styles["Portada"]
+    ))
+    contenido.append(Paragraph(
+        "SISTEMA INTELIGENTE DE GESTIÓN DE ESTACIONAMIENTOS",
+        styles["Subtitulo"]
+    ))
+    contenido.append(Spacer(1, 12))
+    contenido.append(HRFlowable(
+        width="100%",
+        thickness=2,
+        color=azul,
+        spaceAfter=18
+    ))
+
+    # Corregir fechas con formato YYYYnMMnDD
+    informe = re.sub(
+        r"(\d{4})n(\d{2})n(\d{2})",
+        r"\1-\2-\3",
+        informe
+    )
+
+    lineas = informe.split("\n")
+    i = 0
+
+    while i < len(lineas):
+        linea = lineas[i].strip()
+
+        if not linea or linea == "---":
+            i += 1
+            continue
+
+        # Detectar tablas Markdown
+        if linea.startswith("|") and i + 1 < len(lineas):
+            filas = []
+
+            while i < len(lineas) and lineas[i].strip().startswith("|"):
+                fila = lineas[i].strip()
+
+                # Ignorar separador de tabla
+                if not re.match(r"^\|[\s\-:|]+\|$", fila):
+                    celdas = [
+                        celda.strip()
+                        for celda in fila.strip("|").split("|")
+                    ]
+                    filas.append(celdas)
+
+                i += 1
+
+            if filas:
+                datos = []
+
+                for indice, fila in enumerate(filas):
+                    estilo = (
+                        styles["CeldaBlanca"]
+                        if indice == 0
+                        else styles["Celda"]
+                    )
+
+                    datos.append([
+                        Paragraph(html.escape(c), estilo)
+                        for c in fila
+                    ])
+
+                tabla = Table(
+                    datos,
+                    repeatRows=1,
+                    colWidths=[
+                        doc.width * 0.65,
+                        doc.width * 0.35
+                    ] if len(filas[0]) == 2 else None
+                )
+
+                tabla.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), azul),
+                    ("BACKGROUND", (0, 1), (-1, -1), gris),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.white),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ]))
+
+                contenido.append(Spacer(1, 5))
+                contenido.append(tabla)
+                contenido.append(Spacer(1, 12))
+
+            continue
+
+        # Títulos y secciones
+        if linea.startswith("#"):
+            titulo = linea.lstrip("#").strip()
+            titulo = html.escape(titulo)
+
+            contenido.append(Paragraph(
+                titulo,
+                styles["Seccion"]
+            ))
+
+        # Listas
+        elif linea.startswith("- ") or linea.startswith("* "):
+            texto_lista = linea[2:].strip()
+            texto_lista = html.escape(texto_lista)
+            texto_lista = re.sub(
+                r"\*\*(.*?)\*\*",
+                r"<b>\1</b>",
+                texto_lista
+            )
+
+            contenido.append(Paragraph(
+                "• " + texto_lista,
+                styles["Contenido"]
+            ))
+
+        # Numeración
+        elif re.match(r"^\d+\.\s", linea):
+            texto_lista = re.sub(r"^\d+\.\s*", "", linea)
+            texto_lista = html.escape(texto_lista)
+            texto_lista = re.sub(
+                r"\*\*(.*?)\*\*",
+                r"<b>\1</b>",
+                texto_lista
+            )
+
+            numero = re.match(r"^(\d+)\.", linea).group(1)
+
+            contenido.append(Paragraph(
+                f"<b>{numero}.</b> {texto_lista}",
+                styles["Contenido"]
+            ))
+
+        # Texto normal
+        else:
+            texto_linea = html.escape(linea)
+            texto_linea = re.sub(
+                r"\*\*(.*?)\*\*",
+                r"<b>\1</b>",
+                texto_linea
+            )
+
+            contenido.append(Paragraph(
+                texto_linea,
+                styles["Contenido"]
+            ))
+
+        i += 1
+
+    # Pie de página
+    def pie_pagina(canvas, documento):
+        canvas.saveState()
+        canvas.setStrokeColor(azul_claro)
+        canvas.line(
+            1.8 * cm, 1.3 * cm,
+            A4[0] - 1.8 * cm, 1.3 * cm
+        )
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawString(
+            1.8 * cm, 0.9 * cm,
+            "Sistema Inteligente de Gestión de Estacionamientos"
+        )
+        canvas.drawRightString(
+            A4[0] - 1.8 * cm, 0.9 * cm,
+            f"Página {documento.page}"
+        )
+        canvas.restoreState()
+
+    doc.build(
+        contenido,
+        onFirstPage=pie_pagina,
+        onLaterPages=pie_pagina
+    )
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
 @st.fragment(run_every="2s")
 def render_dashboard():
 
@@ -187,10 +461,49 @@ def render_dashboard():
         else:
             st.caption("Aún no hay datos.")
 
+        
+
         st.divider()
+        st.subheader("📄 Informe administrativo")
 
+        if st.button("🤖 Generar informe por IA", use_container_width=True):
+            with st.spinner("Generando informe PDF con IA..."):
+                try:
+                    response = requests.post(
+                        N8N_ANALYSIS_WEBHOOK,
+                        json={"solicitud": "generar_analisis"},
+                        timeout=120
+                    )
 
+                    response.raise_for_status()
+                    resultado = response.json()
 
+                    informe = resultado.get("informe") or resultado.get("output")
+
+                    if informe:
+                        pdf = generar_pdf(informe)
+                        st.session_state.pdf_report = pdf
+                    else:
+                        st.error("No se recibió el informe de IA.")
+
+                except requests.exceptions.Timeout:
+                    st.error("El análisis excedió el tiempo de espera.")
+
+                except requests.exceptions.RequestException as e:
+                    st.error(f"Error al comunicarse con n8n: {e}")
+
+                except Exception as e:
+                    st.error(f"Error al generar el PDF: {e}")
+
+        # Botón de descarga fuera del botón de generación
+        if st.session_state.pdf_report:
+            st.download_button(
+                label="⬇️ Descargar informe PDF",
+                data=st.session_state.pdf_report,
+                file_name="Informe_Estacionamiento.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 # Ejecutar dashboard
 render_dashboard()
